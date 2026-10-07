@@ -1,0 +1,248 @@
+version: '3.8'
+
+# =============================================================================
+# Smart Interactive Dining Table Platform — Production Docker Compose
+# Architecture:
+# - Frontend: Customer 32" Table Touchscreen, Admin Dashboard, KDS Screen
+# - Gateway: Nginx (SSL/TLS Termination, WebSocket streaming, HTTP security headers)
+# - Backend: FastAPI Python 3.12 Engine
+# - Persistence: PostgreSQL 16 Alpine, Redis 7 Alpine
+# - Operations: Automated Daily Database Backups & Health Probes
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # 1. Primary Relational Database: PostgreSQL 16 Alpine
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: smart_table_postgres
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Database password required}
+      POSTGRES_DB: ${POSTGRES_DB:-smart_table}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-smart_table}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal_net
+
+  # ---------------------------------------------------------------------------
+  # 2. In-Memory Cache & Pub/Sub Event Bus: Redis 7 Alpine
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: smart_table_redis
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    command: redis-server --appendonly yes --protected-mode yes
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - internal_net
+
+  # ---------------------------------------------------------------------------
+  # 3. Enterprise Backend API Service (FastAPI)
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: smart_table_api
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DEBUG: ${DEBUG:-false}
+      POSTGRES_SERVER: db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-smart_table}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SECRET_KEY: ${SECRET_KEY:?Production SECRET_KEY required}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://localhost,https://smarttable.local}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - internal_net
+
+  # ---------------------------------------------------------------------------
+  # 4. Customer Table Touchscreen Experience (32" Kiosk Display)
+  # ---------------------------------------------------------------------------
+  customer-app:
+    build:
+      context: ./apps/customer-app
+      dockerfile: Dockerfile
+    container_name: smart_table_customer_app
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+    networks:
+      - internal_net
+
+  # ---------------------------------------------------------------------------
+  # 5. Restaurant Executive Admin Dashboard
+  # ---------------------------------------------------------------------------
+  admin-dashboard:
+    build:
+      context: ./apps/admin-dashboard
+      dockerfile: Dockerfile
+    container_name: smart_table_admin_dashboard
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+    networks:
+      - internal_net
+
+  # ---------------------------------------------------------------------------
+  # 6. Kitchen Display System (KDS App — Line Cook Screens)
+  # ---------------------------------------------------------------------------
+  kds-app:
+    build:
+      context: ./apps/kds-app
+      dockerfile: Dockerfile
+    container_name: smart_table_kds_app
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3002/"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+    networks:
+      - internal_net
+
+  # ---------------------------------------------------------------------------
+  # 7. Production Gateway: Nginx Reverse Proxy with HTTPS & WebSockets
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: smart_table_nginx
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - backend
+      - customer-app
+      - admin-dashboard
+      - kds-app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/ssl:/etc/nginx/ssl:ro
+      - certbot_www:/var/www/certbot:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - internal_net
+
+  # ---------------------------------------------------------------------------
+  # 8. Automated Database Backup Engine (Daily Cron & 14-Day Pruning)
+  # ---------------------------------------------------------------------------
+  db-backup:
+    image: postgres:16-alpine
+    container_name: smart_table_db_backup
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRES_SERVER: db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-smart_table}
+      RETENTION_DAYS: 14
+    volumes:
+      - ./infra/scripts/backup.sh:/backup.sh:ro
+      - db_backups:/backups
+    entrypoint: |
+      sh -c '
+        chmod +x /backup.sh
+        echo "0 3 * * * /backup.sh >> /var/log/cron.log 2>&1" > /etc/crontabs/root
+        echo "Starting daily backup scheduler (Runs at 03:00 UTC)..."
+        /backup.sh
+        crond -f -l 2
+      '
+    networks:
+      - internal_net
+
+# =============================================================================
+# Volumes & Networks
+# =============================================================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  db_backups:
+    driver: local
+  certbot_www:
+    driver: local
+
+networks:
+  internal_net:
+    driver: bridge

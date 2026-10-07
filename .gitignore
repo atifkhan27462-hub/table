@@ -1,0 +1,51 @@
+# Dependency directories
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js build outputs
+.next/
+out/
+build/
+dist/
+
+# Python Virtual Environments & caches
+.venv/
+env/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment files with sensitive credentials
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+!.env.example
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Docker & local database data
+postgres_data/
+redis_data/
+*.sqlite3*
+*.db*
+cloudflared.exe
+table/
+backend/uploads/*
+!backend/uploads/.gitkeep
+

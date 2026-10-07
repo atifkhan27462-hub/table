@@ -1,0 +1,25 @@
+{
+  "name": "smart-dining-table",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:admin": "npm --prefix apps/admin-dashboard run dev",
+    "dev:customer": "npm --prefix apps/customer-app run dev -- -p 3001",
+    "dev:kds": "npm --prefix apps/kds-app run dev -- -p 3002",
+    "dev:backend": "cd backend && .venv\\Scripts\\uvicorn app.main:app --reload --port 8080",
+    "seed": "cd backend && .venv\\Scripts\\python -m app.db.seed",
+    "dev": "npm run dev --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "start": "npm run start --workspaces --if-present",
+    "test:backend": "cd backend && .venv\\Scripts\\pytest",
+    "test": "npm run test:backend",
+    "lint": "npm run lint --workspaces --if-present"
+  },
+  "dependencies": {
+    "lucide-react": "^1.48.0"
+  }
+}
